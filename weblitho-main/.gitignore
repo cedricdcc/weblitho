@@ -22,3 +22,17 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Docker
+.docker
+
+# Server dependencies
+server/node_modules
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Projects directory (generated builds)
+projects/
