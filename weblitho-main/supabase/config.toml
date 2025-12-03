@@ -1,0 +1,16 @@
+project_id = "tgpftguaytmyfcvoqdpy"
+
+[functions.generate-with-openrouter]
+verify_jwt = false
+
+[functions.generate-page]
+verify_jwt = false
+
+[functions.generate-contract]
+verify_jwt = false
+
+[functions.validate-code]
+verify_jwt = false
+
+[functions.weblitho-validate]
+verify_jwt = false
