@@ -93,15 +93,21 @@ app.post("/api/preview/build", buildLimiter, async (req, res) => {
       });
     }
     
+    // Get the Docker volume name - docker-compose prefixes with directory name
+    // The volume is mounted at /projects in the backend container
+    // We need to find the actual volume name to mount in the build container
+    const volumeName = process.env.PROJECTS_VOLUME || 'weblitho-main_projects';
+    
     // Create Docker container for building (don't auto-remove so we can get logs)
     // Note: rw mount is required as npm install creates node_modules and npm run build creates dist
     // Using npm install instead of npm ci since we generate package.json dynamically (no lockfile)
+    // We mount the entire projects volume and use the subdirectory as workdir
     const container = await docker.createContainer({
       Image: imageName,
       Cmd: ["sh", "-c", "npm install 2>&1 && npm run build 2>&1"],
-      WorkingDir: "/app",
+      WorkingDir: `/projects/${projectId}`,
       HostConfig: {
-        Binds: [`${projectPath}:/app:rw`],
+        Binds: [`${volumeName}:/projects:rw`],
         AutoRemove: false,  // Keep container to get logs on failure
       },
       Tty: true,

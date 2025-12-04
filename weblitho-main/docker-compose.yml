@@ -31,6 +31,7 @@ services:
     environment:
       - PORT=8080
       - PROJECTS_DIR=/projects
+      - PROJECTS_VOLUME=weblitho-main_projects
     volumes:
       - projects:/projects:rw
       - /var/run/docker.sock:/var/run/docker.sock:ro
