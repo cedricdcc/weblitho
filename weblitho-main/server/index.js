@@ -329,8 +329,161 @@ app.post("/api/preview/deploy", apiLimiter, async (req, res) => {
       fs.mkdirSync(projectPath, { recursive: true });
     }
 
-    // If we have Next.js/Vite files, write them
+    console.log(`Creating Vite project for: ${projectId}`);
+    
+    // Always create a complete, buildable Vite React project
+    // This ensures the project can be built regardless of what files are sent
+    
+    // 1. Create package.json
+    const packageJson = {
+      name: `weblitho-${projectId}`,
+      private: true,
+      version: "0.0.1",
+      type: "module",
+      scripts: {
+        dev: "vite",
+        build: "vite build",
+        preview: "vite preview"
+      },
+      dependencies: {
+        react: "^18.3.1",
+        "react-dom": "^18.3.1"
+      },
+      devDependencies: {
+        "@types/react": "^18.3.3",
+        "@types/react-dom": "^18.3.0",
+        "@vitejs/plugin-react": "^4.3.4",
+        vite: "^6.0.0"
+      }
+    };
+    fs.writeFileSync(
+      path.join(projectPath, 'package.json'),
+      JSON.stringify(packageJson, null, 2),
+      'utf8'
+    );
+    
+    // 2. Create vite.config.js
+    const viteConfig = `import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+})
+`;
+    fs.writeFileSync(
+      path.join(projectPath, 'vite.config.js'),
+      viteConfig,
+      'utf8'
+    );
+    
+    // 3. Create src directory
+    const srcPath = path.join(projectPath, 'src');
+    if (!fs.existsSync(srcPath)) {
+      fs.mkdirSync(srcPath, { recursive: true });
+    }
+    
+    // 4. Create index.html
+    // Extract styles from preview if available
+    let headStyles = '';
+    if (preview) {
+      const styleMatches = preview.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi);
+      for (const match of styleMatches) {
+        headStyles += `<style>${match[1]}</style>\n    `;
+      }
+    }
+    
+    const indexHtml = `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Weblitho Preview</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    ${headStyles}
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
+`;
+    fs.writeFileSync(path.join(projectPath, 'index.html'), indexHtml, 'utf8');
+    
+    // 5. Create main.jsx
+    const mainJsx = `import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.jsx'
+import './index.css'
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)
+`;
+    fs.writeFileSync(path.join(srcPath, 'main.jsx'), mainJsx, 'utf8');
+    
+    // 6. Create App.jsx - render the preview HTML content
+    let appContent = '';
+    
+    if (preview) {
+      // Extract body content from the preview HTML
+      let bodyContent = preview;
+      const bodyMatch = preview.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+      if (bodyMatch) {
+        bodyContent = bodyMatch[1];
+      }
+      
+      // Clean up the body content - remove script tags that load modules
+      bodyContent = bodyContent.replace(/<script[^>]*type="module"[^>]*>[\s\S]*?<\/script>/gi, '');
+      bodyContent = bodyContent.replace(/<script[^>]*src="[^"]*"[^>]*>[\s\S]*?<\/script>/gi, '');
+      
+      // Escape backticks and dollar signs for template literal
+      const escapedBody = bodyContent
+        .replace(/\\/g, '\\\\')
+        .replace(/`/g, '\\`')
+        .replace(/\$/g, '\\$');
+      
+      appContent = `function App() {
+  return (
+    <div dangerouslySetInnerHTML={{ __html: \`${escapedBody}\` }} />
+  )
+}`;
+    } else {
+      // If no preview, create a simple placeholder
+      appContent = `function App() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+      <div className="text-center">
+        <h1 className="text-4xl font-bold text-gray-800 mb-4">Weblitho Preview</h1>
+        <p className="text-gray-600">Your generated content will appear here</p>
+      </div>
+    </div>
+  )
+}`;
+    }
+    
+    const appJsx = `import React from 'react'
+
+${appContent}
+
+export default App
+`;
+    fs.writeFileSync(path.join(srcPath, 'App.jsx'), appJsx, 'utf8');
+    
+    // 7. Create index.css with base Tailwind directives
+    const indexCss = `@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom styles */
+`;
+    fs.writeFileSync(path.join(srcPath, 'index.css'), indexCss, 'utf8');
+    
+    // 8. If we have additional component files, write them
     if (files && Array.isArray(files) && files.length > 0) {
+      console.log(`Writing ${files.length} additional files for: ${projectId}`);
+      
       for (const file of files) {
         if (!file.path || typeof file.content !== 'string') continue;
         
@@ -338,6 +491,18 @@ app.post("/api/preview/deploy", apiLimiter, async (req, res) => {
         const normalizedPath = path.normalize(file.path);
         if (normalizedPath.startsWith('..') || normalizedPath.startsWith('/')) {
           console.warn(`Skipping suspicious file path: ${file.path}`);
+          continue;
+        }
+        
+        // Skip files we've already created (package.json, vite.config, index.html, main.jsx, App.jsx)
+        const baseName = path.basename(normalizedPath).toLowerCase();
+        if (['package.json', 'vite.config.js', 'vite.config.ts', 'index.html'].includes(baseName)) {
+          console.log(`Skipping ${file.path} - using generated version`);
+          continue;
+        }
+        if (normalizedPath === 'src/main.jsx' || normalizedPath === 'src/main.tsx' ||
+            normalizedPath === 'src/App.jsx' || normalizedPath === 'src/App.tsx') {
+          console.log(`Skipping ${file.path} - using generated version`);
           continue;
         }
         
@@ -350,202 +515,15 @@ app.post("/api/preview/deploy", apiLimiter, async (req, res) => {
         }
         
         fs.writeFileSync(filePath, file.content, 'utf8');
-      }
-      
-      // Create a basic package.json if not present in files
-      const hasPackageJson = files.some(f => f.path === 'package.json');
-      if (!hasPackageJson) {
-        const packageJson = {
-          name: `weblitho-${projectId}`,
-          private: true,
-          version: "0.0.1",
-          type: "module",
-          scripts: {
-            dev: "vite",
-            build: "vite build",
-            preview: "vite preview"
-          },
-          dependencies: {
-            react: "^18.3.1",
-            "react-dom": "^18.3.1"
-          },
-          devDependencies: {
-            "@vitejs/plugin-react": "^4.3.4",
-            vite: "^6.0.0"
-          }
-        };
-        fs.writeFileSync(
-          path.join(projectPath, 'package.json'),
-          JSON.stringify(packageJson, null, 2),
-          'utf8'
-        );
-      }
-
-      // Create vite.config.js if not present
-      const hasViteConfig = files.some(f => f.path.includes('vite.config'));
-      if (!hasViteConfig) {
-        const viteConfig = `import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-
-export default defineConfig({
-  plugins: [react()],
-})
-`;
-        fs.writeFileSync(
-          path.join(projectPath, 'vite.config.js'),
-          viteConfig,
-          'utf8'
-        );
+        console.log(`Wrote file: ${normalizedPath}`);
       }
     }
-
-    // If we only have preview HTML (no files array), create a proper Vite React project from the HTML
-    if (preview && (!files || files.length === 0)) {
-      console.log(`Creating Vite project from preview HTML for: ${projectId}`);
-      
-      // Create a proper Vite React project structure
-      // 1. Create package.json
-      const packageJson = {
-        name: `weblitho-${projectId}`,
-        private: true,
-        version: "0.0.1",
-        type: "module",
-        scripts: {
-          dev: "vite",
-          build: "vite build",
-          preview: "vite preview"
-        },
-        dependencies: {
-          react: "^18.3.1",
-          "react-dom": "^18.3.1"
-        },
-        devDependencies: {
-          "@types/react": "^18.3.3",
-          "@types/react-dom": "^18.3.0",
-          "@vitejs/plugin-react": "^4.3.4",
-          vite: "^6.0.0"
-        }
-      };
-      fs.writeFileSync(
-        path.join(projectPath, 'package.json'),
-        JSON.stringify(packageJson, null, 2),
-        'utf8'
-      );
-      
-      // 2. Create vite.config.js
-      const viteConfig = `import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-
-export default defineConfig({
-  plugins: [react()],
-})
-`;
-      fs.writeFileSync(
-        path.join(projectPath, 'vite.config.js'),
-        viteConfig,
-        'utf8'
-      );
-      
-      // 3. Create index.html that loads React
-      const indexHtml = `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Weblitho Preview</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
-</html>
-`;
-      fs.writeFileSync(path.join(projectPath, 'index.html'), indexHtml, 'utf8');
-      
-      // 4. Create src directory
-      const srcPath = path.join(projectPath, 'src');
-      if (!fs.existsSync(srcPath)) {
-        fs.mkdirSync(srcPath, { recursive: true });
-      }
-      
-      // 5. Create main.jsx
-      const mainJsx = `import React from 'react'
-import ReactDOM from 'react-dom/client'
-import App from './App.jsx'
-import './index.css'
-
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-)
-`;
-      fs.writeFileSync(path.join(srcPath, 'main.jsx'), mainJsx, 'utf8');
-      
-      // 6. Create App.jsx that renders the preview HTML using dangerouslySetInnerHTML
-      // Extract body content from the preview HTML
-      let bodyContent = preview;
-      const bodyMatch = preview.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-      if (bodyMatch) {
-        bodyContent = bodyMatch[1];
-      }
-      
-      // Extract any inline styles from head
-      let styles = '';
-      const styleMatches = preview.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi);
-      for (const match of styleMatches) {
-        styles += match[1] + '\n';
-      }
-      
-      // Extract external script sources (like Tailwind CDN)
-      const scriptSrcs = [];
-      const scriptSrcMatches = preview.matchAll(/<script[^>]*src="([^"]+)"[^>]*>/gi);
-      for (const match of scriptSrcMatches) {
-        scriptSrcs.push(match[1]);
-      }
-      
-      const appJsx = `import React, { useEffect } from 'react'
-
-function App() {
-  useEffect(() => {
-    // Load external scripts
-    ${scriptSrcs.map(src => `
-    const script${scriptSrcs.indexOf(src)} = document.createElement('script');
-    script${scriptSrcs.indexOf(src)}.src = "${src}";
-    document.head.appendChild(script${scriptSrcs.indexOf(src)});`).join('')}
-  }, []);
-
-  return (
-    <>
-      <style dangerouslySetInnerHTML={{ __html: \`${styles.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\` }} />
-      <div dangerouslySetInnerHTML={{ __html: \`${bodyContent.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\` }} />
-    </>
-  )
-}
-
-export default App
-`;
-      fs.writeFileSync(path.join(srcPath, 'App.jsx'), appJsx, 'utf8');
-      
-      // 7. Create empty index.css
-      fs.writeFileSync(path.join(srcPath, 'index.css'), '/* Styles */\n', 'utf8');
-      
-      console.log(`Vite project created for: ${projectId}, ready for build`);
-      
-      return res.json({
-        previewUrl: `/preview/${projectId}`,
-        message: "Vite project created from preview — ready for build",
-        projectId,
-        needsBuild: true
-      });
-    }
-
-    console.log(`Project files written for: ${projectId}`);
+    
+    console.log(`Vite project created for: ${projectId}, ready for build`);
     
     res.json({
       previewUrl: `/preview/${projectId}`,
-      message: "Project deployed — ready for build",
+      message: "Vite project created — ready for build",
       projectId,
       needsBuild: true
     });
