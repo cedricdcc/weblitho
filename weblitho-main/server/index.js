@@ -94,10 +94,11 @@ app.post("/api/preview/build", buildLimiter, async (req, res) => {
     }
     
     // Create Docker container for building (don't auto-remove so we can get logs)
-    // Note: rw mount is required as npm ci creates node_modules and npm run build creates dist
+    // Note: rw mount is required as npm install creates node_modules and npm run build creates dist
+    // Using npm install instead of npm ci since we generate package.json dynamically (no lockfile)
     const container = await docker.createContainer({
       Image: imageName,
-      Cmd: ["sh", "-c", "npm ci 2>&1 && npm run build 2>&1"],
+      Cmd: ["sh", "-c", "npm install 2>&1 && npm run build 2>&1"],
       WorkingDir: "/app",
       HostConfig: {
         Binds: [`${projectPath}:/app:rw`],
