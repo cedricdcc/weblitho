@@ -70,10 +70,30 @@ app.post("/api/preview/build", buildLimiter, async (req, res) => {
   console.log(`Starting build for project: ${projectId}`);
 
   try {
+    const imageName = "node:22-alpine";
+    
+    // Check if image exists, if not pull it
+    try {
+      await docker.getImage(imageName).inspect();
+      console.log(`Image ${imageName} already exists`);
+    } catch (imageErr) {
+      console.log(`Image ${imageName} not found, pulling...`);
+      await new Promise((resolve, reject) => {
+        docker.pull(imageName, (err, stream) => {
+          if (err) return reject(err);
+          docker.modem.followProgress(stream, (err, output) => {
+            if (err) return reject(err);
+            console.log(`Image ${imageName} pulled successfully`);
+            resolve(output);
+          });
+        });
+      });
+    }
+    
     // Create and run Docker container for building
     // Note: rw mount is required as npm ci creates node_modules and npm run build creates dist
     const container = await docker.createContainer({
-      Image: "node:22-alpine",
+      Image: imageName,
       Cmd: ["sh", "-c", "npm ci && npm run build"],
       WorkingDir: "/app",
       HostConfig: {
