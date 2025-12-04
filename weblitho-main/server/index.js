@@ -172,12 +172,8 @@ app.post("/api/preview/deploy", apiLimiter, async (req, res) => {
   }
 
   // Validate projectId format (alphanumeric, hyphens, underscores only)
+  // This regex already excludes dots, slashes, and backslashes
   if (!/^[a-zA-Z0-9_-]+$/.test(projectId)) {
-    return res.status(400).json({ error: "Invalid projectId format" });
-  }
-
-  // Additional security: ensure projectId doesn't contain path traversal patterns
-  if (projectId.includes('..') || projectId.includes('/') || projectId.includes('\\')) {
     return res.status(400).json({ error: "Invalid projectId format" });
   }
 

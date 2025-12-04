@@ -174,7 +174,7 @@ export const PreviewPanel = ({ code, isGenerating = false, generationStatus = ""
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => window.open(previewUrl, '_blank')}
+                  onClick={() => window.open(previewUrl, '_blank', 'noopener,noreferrer')}
                   className="h-6 px-2 text-xs"
                 >
                   <ExternalLink className="h-3 w-3" />

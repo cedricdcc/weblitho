@@ -21,9 +21,10 @@ interface PreviewStatus {
 }
 
 // Get the API base URL from environment or default to same origin
+// In production with Docker, API is proxied through nginx at the same origin
+// In development, set VITE_API_URL to point to your backend (e.g., http://localhost:8080)
+// When empty, API calls use relative paths which work when nginx proxies /api/* to backend
 const getApiBaseUrl = () => {
-  // In production with Docker, API is proxied through nginx
-  // In development, you might need to set VITE_API_URL
   return import.meta.env.VITE_API_URL || '';
 };
 
