@@ -10,6 +10,9 @@ const docker = new Docker();
 const PORT = process.env.PORT || 8080;
 const PROJECTS_DIR = process.env.PROJECTS_DIR || "/projects";
 
+// Trust proxy (nginx) - required for rate limiting behind reverse proxy
+app.set('trust proxy', 1);
+
 app.use(cors());
 app.use(express.json());
 
