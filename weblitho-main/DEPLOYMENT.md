@@ -178,10 +178,25 @@ After calling `/api/preview/build`, the `dist/` folder will be created:
 
 ## Security Considerations
 
-- The backend container has access to the Docker socket (read-only)
-- Project IDs are validated to prevent path traversal
-- Preview files are served with `X-Robots-Tag: noindex`
-- No open ports except via Cloudflare Tunnel
+### Docker Socket Access
+The backend container has read-only access to the Docker socket (`/var/run/docker.sock:ro`) which is required to spawn build containers. This provides significant access to the Docker daemon. Security recommendations:
+
+- Run in a trusted network environment
+- Consider using rootless Docker if available
+- For higher security environments, consider alternatives like:
+  - Kaniko for rootless container builds
+  - A dedicated CI/CD system (GitHub Actions, GitLab CI)
+  - BuildKit with a remote builder
+
+### Project ID Validation
+- Project IDs are validated to contain only alphanumeric characters, hyphens, and underscores
+- Path traversal patterns (`.`, `/`, `\`) are explicitly blocked
+- Preview files are served with `X-Robots-Tag: noindex` to prevent search engine indexing
+
+### Network Security
+- No open ports except via Cloudflare Tunnel (recommended)
+- Internal Docker network for service-to-service communication
+- API endpoints only accessible through the nginx proxy
 
 ## Troubleshooting
 

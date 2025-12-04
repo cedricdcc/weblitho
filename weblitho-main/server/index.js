@@ -3,6 +3,7 @@ import cors from "cors";
 import Docker from "dockerode";
 import fs from "fs";
 import path from "path";
+import rateLimit from "express-rate-limit";
 
 const app = express();
 const docker = new Docker();
@@ -12,13 +13,31 @@ const PROJECTS_DIR = process.env.PROJECTS_DIR || "/projects";
 app.use(cors());
 app.use(express.json());
 
-// Health check endpoint
+// Rate limiting for API endpoints
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests, please try again later." }
+});
+
+// Stricter rate limiting for build endpoint (resource intensive)
+const buildLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5, // limit each IP to 5 builds per minute
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many build requests, please try again later." }
+});
+
+// Health check endpoint (no rate limiting)
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
 // Build preview endpoint - builds a project and returns preview URL
-app.post("/api/preview/build", async (req, res) => {
+app.post("/api/preview/build", buildLimiter, async (req, res) => {
   const { projectId } = req.body;
 
   if (!projectId) {
@@ -26,7 +45,13 @@ app.post("/api/preview/build", async (req, res) => {
   }
 
   // Validate projectId format (alphanumeric, hyphens, underscores only)
+  // This validation prevents path traversal attacks (no dots, slashes, etc.)
   if (!/^[a-zA-Z0-9_-]+$/.test(projectId)) {
+    return res.status(400).json({ error: "Invalid projectId format" });
+  }
+
+  // Additional security: ensure projectId doesn't contain path traversal patterns
+  if (projectId.includes('..') || projectId.includes('/') || projectId.includes('\\')) {
     return res.status(400).json({ error: "Invalid projectId format" });
   }
 
@@ -46,9 +71,10 @@ app.post("/api/preview/build", async (req, res) => {
 
   try {
     // Create and run Docker container for building
+    // Note: rw mount is required as npm ci creates node_modules and npm run build creates dist
     const container = await docker.createContainer({
       Image: "node:22-alpine",
-      Cmd: ["sh", "-c", "npm ci --omit=dev && npm run build"],
+      Cmd: ["sh", "-c", "npm ci && npm run build"],
       WorkingDir: "/app",
       HostConfig: {
         Binds: [`${projectPath}:/app:rw`],
@@ -91,7 +117,7 @@ app.post("/api/preview/build", async (req, res) => {
 });
 
 // Get build status endpoint
-app.get("/api/preview/status/:projectId", (req, res) => {
+app.get("/api/preview/status/:projectId", apiLimiter, (req, res) => {
   const { projectId } = req.params;
 
   // Validate projectId format
@@ -118,7 +144,7 @@ app.get("/api/preview/status/:projectId", (req, res) => {
 });
 
 // List all projects with preview status
-app.get("/api/preview/list", (req, res) => {
+app.get("/api/preview/list", apiLimiter, (req, res) => {
   if (!fs.existsSync(PROJECTS_DIR)) {
     return res.json({ projects: [] });
   }
