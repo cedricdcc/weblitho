@@ -90,16 +90,17 @@ app.post("/api/preview/build", buildLimiter, async (req, res) => {
       });
     }
     
-    // Create and run Docker container for building
+    // Create Docker container for building (don't auto-remove so we can get logs)
     // Note: rw mount is required as npm ci creates node_modules and npm run build creates dist
     const container = await docker.createContainer({
       Image: imageName,
-      Cmd: ["sh", "-c", "npm ci && npm run build"],
+      Cmd: ["sh", "-c", "npm ci 2>&1 && npm run build 2>&1"],
       WorkingDir: "/app",
       HostConfig: {
         Binds: [`${projectPath}:/app:rw`],
-        AutoRemove: true,
+        AutoRemove: false,  // Keep container to get logs on failure
       },
+      Tty: true,
     });
 
     await container.start();
@@ -107,18 +108,39 @@ app.post("/api/preview/build", buildLimiter, async (req, res) => {
     // Wait for container to finish
     const result = await container.wait();
     
+    // Get container logs
+    const logStream = await container.logs({
+      stdout: true,
+      stderr: true,
+      follow: false,
+    });
+    const logs = logStream.toString('utf8');
+    
+    // Clean up container
+    try {
+      await container.remove();
+    } catch (removeErr) {
+      console.log('Container already removed or error removing:', removeErr.message);
+    }
+    
     if (result.StatusCode !== 0) {
       console.error(`Build failed for project ${projectId} with status ${result.StatusCode}`);
+      console.error(`Build logs:\n${logs}`);
       return res.status(500).json({ 
         error: "Build failed", 
-        exitCode: result.StatusCode 
+        exitCode: result.StatusCode,
+        logs: logs.slice(-2000)  // Return last 2000 chars of logs
       });
     }
 
     // Verify dist directory was created
     const distPath = path.join(projectPath, "dist");
     if (!fs.existsSync(distPath)) {
-      return res.status(500).json({ error: "Build completed but dist directory not found" });
+      console.error(`Build logs:\n${logs}`);
+      return res.status(500).json({ 
+        error: "Build completed but dist directory not found",
+        logs: logs.slice(-2000)
+      });
     }
 
     const previewUrl = `/preview/${projectId}`;
