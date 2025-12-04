@@ -1,0 +1,17 @@
+{
+  "name": "weblitho-preview-server",
+  "version": "1.0.0",
+  "description": "Backend server for Weblitho preview builds",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dockerode": "^4.0.2",
+    "express": "^4.21.1",
+    "express-rate-limit": "^7.5.0"
+  }
+}
