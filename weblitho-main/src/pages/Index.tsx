@@ -89,7 +89,7 @@ const Index = () => {
   const abortControllerRef = useRef<AbortController | null>(null);
   
   const { projects, loading: projectsLoading, createProject, updateProject, deleteProject, getProjectVersions, restoreVersion } = useProjects();
-  const { isDeploying, deployProject, getFullPreviewUrl } = usePreviewService();
+  const { isDeploying, isBuilding, deployAndBuild, getFullPreviewUrl } = usePreviewService();
 
   // Check authentication
   useEffect(() => {
@@ -181,11 +181,11 @@ const Index = () => {
       }
       toast({ title: "Project saved", description: "Your project has been saved automatically" });
       
-      // Deploy to server for static preview (if we have a project ID)
+      // Deploy and build on server for preview (if we have a project ID)
       if (currentProjectId) {
-        const deployResult = await deployProject(currentProjectId, files, preview);
-        if (deployResult) {
-          setServerPreviewUrl(getFullPreviewUrl(deployResult.previewUrl));
+        const previewUrl = await deployAndBuild(currentProjectId, files, preview);
+        if (previewUrl) {
+          setServerPreviewUrl(getFullPreviewUrl(previewUrl));
         }
       }
     } catch (error) {
@@ -193,22 +193,23 @@ const Index = () => {
     } finally {
       setIsSaving(false);
     }
-  }, [user, projectId, selectedModel, updateProject, createProject, setSearchParams, toast, deployProject, getFullPreviewUrl]);
+  }, [user, projectId, selectedModel, updateProject, createProject, setSearchParams, toast, deployAndBuild, getFullPreviewUrl]);
 
-  // Manual deploy to server
+  // Manual deploy to server - deploys files and runs npm build
   const handleDeployToServer = useCallback(async () => {
     if (!projectId || !generatedContent) return;
     
-    const deployResult = await deployProject(
+    // Deploy and build - this sends files to backend, creates Vite project, runs npm build
+    const previewUrl = await deployAndBuild(
       projectId, 
       generatedContent.files || [], 
       generatedContent.preview
     );
     
-    if (deployResult) {
-      setServerPreviewUrl(getFullPreviewUrl(deployResult.previewUrl));
+    if (previewUrl) {
+      setServerPreviewUrl(getFullPreviewUrl(previewUrl));
     }
-  }, [projectId, generatedContent, deployProject, getFullPreviewUrl]);
+  }, [projectId, generatedContent, deployAndBuild, getFullPreviewUrl]);
 
   const toggleTheme = () => {
     setTheme(prev => prev === "dark" ? "light" : "dark");
@@ -636,11 +637,13 @@ const Index = () => {
                     variant="ghost" 
                     size="sm" 
                     onClick={handleDeployToServer}
-                    disabled={isDeploying}
+                    disabled={isDeploying || isBuilding}
                     className="text-muted-foreground hover:text-foreground hover:bg-white/10 h-8 gap-2"
                   >
-                    <Upload className={`h-4 w-4 ${isDeploying ? 'animate-pulse' : ''}`} />
-                    <span className="hidden md:inline">{isDeploying ? 'Deploying...' : 'Deploy'}</span>
+                    <Upload className={`h-4 w-4 ${(isDeploying || isBuilding) ? 'animate-pulse' : ''}`} />
+                    <span className="hidden md:inline">
+                      {isDeploying ? 'Deploying...' : isBuilding ? 'Building...' : 'Deploy'}
+                    </span>
                   </Button>
                 )}
                 
