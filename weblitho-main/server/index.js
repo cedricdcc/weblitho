@@ -157,9 +157,53 @@ app.post("/api/preview/build", buildLimiter, async (req, res) => {
     
     console.log(`Build completed for project: ${projectId}`);
     
+    // Start a persistent preview server container
+    // First, stop any existing preview container for this project
+    const containerName = `weblitho-preview-${projectId}`;
+    try {
+      const existingContainer = docker.getContainer(containerName);
+      await existingContainer.stop().catch(() => {});
+      await existingContainer.remove().catch(() => {});
+      console.log(`Removed existing preview container: ${containerName}`);
+    } catch (e) {
+      // Container doesn't exist, that's fine
+    }
+    
+    // Find a random available port (between 3000-4000)
+    const previewPort = 3000 + Math.floor(Math.random() * 1000);
+    
+    // Create and start persistent preview container
+    const previewContainer = await docker.createContainer({
+      Image: imageName,
+      name: containerName,
+      Cmd: ["sh", "-c", "npm run preview -- --host 0.0.0.0 --port 4173"],
+      WorkingDir: `/projects/${projectId}`,
+      ExposedPorts: {
+        "4173/tcp": {}
+      },
+      HostConfig: {
+        Binds: [`${volumeName}:/projects:rw`],
+        PortBindings: {
+          "4173/tcp": [{ HostPort: String(previewPort) }]
+        },
+        AutoRemove: false,
+        RestartPolicy: { Name: "unless-stopped" }
+      },
+      Tty: true,
+    });
+    
+    await previewContainer.start();
+    console.log(`Preview server started for project ${projectId} on port ${previewPort}`);
+    
+    // Give the server a moment to start
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
     res.json({
       previewUrl,
-      message: "Build finished — preview ready",
+      devServerUrl: `http://localhost:${previewPort}`,
+      devServerPort: previewPort,
+      containerName,
+      message: "Build finished — preview server running",
       projectId,
     });
   } catch (err) {
@@ -184,15 +228,61 @@ app.get("/api/preview/status/:projectId", apiLimiter, (req, res) => {
     return res.status(404).json({ status: "not_found", projectId });
   }
 
+  // Check if there's a running preview container
+  let devServerInfo = null;
+  const containerName = `weblitho-preview-${projectId}`;
+  try {
+    const container = docker.getContainer(containerName);
+    const info = await container.inspect();
+    if (info.State.Running) {
+      const portBindings = info.NetworkSettings.Ports["4173/tcp"];
+      if (portBindings && portBindings.length > 0) {
+        devServerInfo = {
+          running: true,
+          port: parseInt(portBindings[0].HostPort),
+          containerName
+        };
+      }
+    }
+  } catch (e) {
+    // Container doesn't exist
+  }
+
   if (fs.existsSync(distPath)) {
     return res.json({ 
       status: "ready", 
       projectId,
-      previewUrl: `/preview/${projectId}`
+      previewUrl: `/preview/${projectId}`,
+      devServer: devServerInfo
     });
   }
 
-  res.json({ status: "pending", projectId });
+  res.json({ status: "pending", projectId, devServer: devServerInfo });
+});
+
+// Stop preview server endpoint
+app.post("/api/preview/stop/:projectId", apiLimiter, async (req, res) => {
+  const { projectId } = req.params;
+
+  // Validate projectId format
+  if (!/^[a-zA-Z0-9_-]+$/.test(projectId)) {
+    return res.status(400).json({ error: "Invalid projectId format" });
+  }
+
+  const containerName = `weblitho-preview-${projectId}`;
+  try {
+    const container = docker.getContainer(containerName);
+    await container.stop();
+    await container.remove();
+    console.log(`Stopped and removed preview container: ${containerName}`);
+    res.json({ message: "Preview server stopped", projectId });
+  } catch (err) {
+    if (err.statusCode === 404) {
+      return res.status(404).json({ error: "Preview server not found", projectId });
+    }
+    console.error(`Error stopping preview server for ${projectId}:`, err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // List all projects with preview status
