@@ -163,6 +163,138 @@ app.get("/api/preview/list", apiLimiter, (req, res) => {
   res.json({ projects });
 });
 
+// Deploy project endpoint - receives project files from frontend and writes to disk
+app.post("/api/preview/deploy", apiLimiter, async (req, res) => {
+  const { projectId, files, preview } = req.body;
+
+  if (!projectId) {
+    return res.status(400).json({ error: "projectId is required" });
+  }
+
+  // Validate projectId format (alphanumeric, hyphens, underscores only)
+  if (!/^[a-zA-Z0-9_-]+$/.test(projectId)) {
+    return res.status(400).json({ error: "Invalid projectId format" });
+  }
+
+  // Additional security: ensure projectId doesn't contain path traversal patterns
+  if (projectId.includes('..') || projectId.includes('/') || projectId.includes('\\')) {
+    return res.status(400).json({ error: "Invalid projectId format" });
+  }
+
+  const projectPath = path.join(PROJECTS_DIR, projectId);
+
+  console.log(`Deploying project: ${projectId}`);
+
+  try {
+    // Create project directory if it doesn't exist
+    if (!fs.existsSync(projectPath)) {
+      fs.mkdirSync(projectPath, { recursive: true });
+    }
+
+    // If we have Next.js/Vite files, write them
+    if (files && Array.isArray(files) && files.length > 0) {
+      for (const file of files) {
+        if (!file.path || typeof file.content !== 'string') continue;
+        
+        // Validate file path to prevent path traversal
+        const normalizedPath = path.normalize(file.path);
+        if (normalizedPath.startsWith('..') || normalizedPath.startsWith('/')) {
+          console.warn(`Skipping suspicious file path: ${file.path}`);
+          continue;
+        }
+        
+        const filePath = path.join(projectPath, normalizedPath);
+        const fileDir = path.dirname(filePath);
+        
+        // Create directory if needed
+        if (!fs.existsSync(fileDir)) {
+          fs.mkdirSync(fileDir, { recursive: true });
+        }
+        
+        fs.writeFileSync(filePath, file.content, 'utf8');
+      }
+      
+      // Create a basic package.json if not present in files
+      const hasPackageJson = files.some(f => f.path === 'package.json');
+      if (!hasPackageJson) {
+        const packageJson = {
+          name: `weblitho-${projectId}`,
+          private: true,
+          version: "0.0.1",
+          type: "module",
+          scripts: {
+            dev: "vite",
+            build: "vite build",
+            preview: "vite preview"
+          },
+          dependencies: {
+            react: "^18.3.1",
+            "react-dom": "^18.3.1"
+          },
+          devDependencies: {
+            "@vitejs/plugin-react": "^4.3.4",
+            vite: "^6.0.0"
+          }
+        };
+        fs.writeFileSync(
+          path.join(projectPath, 'package.json'),
+          JSON.stringify(packageJson, null, 2),
+          'utf8'
+        );
+      }
+
+      // Create vite.config.js if not present
+      const hasViteConfig = files.some(f => f.path.includes('vite.config'));
+      if (!hasViteConfig) {
+        const viteConfig = `import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+})
+`;
+        fs.writeFileSync(
+          path.join(projectPath, 'vite.config.js'),
+          viteConfig,
+          'utf8'
+        );
+      }
+    }
+
+    // If we only have preview HTML (no Next.js files), create a simple static site
+    if (preview && (!files || files.length === 0)) {
+      // Create dist directory with the preview HTML
+      const distPath = path.join(projectPath, 'dist');
+      if (!fs.existsSync(distPath)) {
+        fs.mkdirSync(distPath, { recursive: true });
+      }
+      
+      fs.writeFileSync(path.join(distPath, 'index.html'), preview, 'utf8');
+      
+      console.log(`Deployed static preview for project: ${projectId}`);
+      
+      return res.json({
+        previewUrl: `/preview/${projectId}`,
+        message: "Static preview deployed — ready to view",
+        projectId,
+        needsBuild: false
+      });
+    }
+
+    console.log(`Project files written for: ${projectId}`);
+    
+    res.json({
+      previewUrl: `/preview/${projectId}`,
+      message: "Project deployed — ready for build",
+      projectId,
+      needsBuild: true
+    });
+  } catch (err) {
+    console.error(`Deploy error for project ${projectId}:`, err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Weblitho Preview Server running on port ${PORT}`);
   console.log(`Projects directory: ${PROJECTS_DIR}`);

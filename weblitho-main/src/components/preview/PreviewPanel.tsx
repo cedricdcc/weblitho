@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Monitor, Smartphone, Tablet, Code2, Eye, Copy, Download, CheckCircle, AlertTriangle } from "lucide-react";
+import { Monitor, Smartphone, Tablet, Code2, Eye, Copy, Download, CheckCircle, AlertTriangle, ExternalLink, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
@@ -21,6 +21,7 @@ interface PreviewPanelProps {
   isGenerating?: boolean;
   generationStatus?: string;
   validation?: ValidationResult | null;
+  previewUrl?: string | null; // Server-hosted preview URL
 }
 
 type ViewportSize = "mobile" | "tablet" | "desktop";
@@ -31,8 +32,9 @@ const viewportDimensions = {
   desktop: { width: "100%", height: "100%" },
 };
 
-export const PreviewPanel = ({ code, isGenerating = false, generationStatus = "", validation }: PreviewPanelProps) => {
+export const PreviewPanel = ({ code, isGenerating = false, generationStatus = "", validation, previewUrl }: PreviewPanelProps) => {
   const [viewport, setViewport] = useState<ViewportSize>("desktop");
+  const [useServerPreview, setUseServerPreview] = useState(false);
   const { toast } = useToast();
 
   // Clean code - extract HTML content, strip any reasoning/thinking tokens
@@ -162,6 +164,33 @@ export const PreviewPanel = ({ code, isGenerating = false, generationStatus = ""
         </div>
 
         <TabsContent value="preview" className="flex-1 m-0 overflow-auto p-4 bg-[#0a0a0a]">
+          {/* Server Preview URL indicator */}
+          {previewUrl && (
+            <div className="mb-4 flex items-center justify-center gap-2">
+              <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 border border-border/50">
+                <Globe className="h-4 w-4 text-primary" />
+                <span className="text-sm text-muted-foreground">Preview URL:</span>
+                <code className="text-sm text-primary font-mono">{previewUrl}</code>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => window.open(previewUrl, '_blank')}
+                  className="h-6 px-2 text-xs"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                </Button>
+              </div>
+              <Button
+                variant={useServerPreview ? "default" : "outline"}
+                size="sm"
+                onClick={() => setUseServerPreview(!useServerPreview)}
+                className="h-8 text-xs"
+              >
+                {useServerPreview ? "Using Server" : "Use Server Preview"}
+              </Button>
+            </div>
+          )}
+          
           <div className="flex items-start justify-center min-h-full">
             <div
               className="bg-white rounded-xl shadow-2xl transition-all duration-500 overflow-hidden border border-white/10"
@@ -171,12 +200,21 @@ export const PreviewPanel = ({ code, isGenerating = false, generationStatus = ""
                 maxWidth: "100%",
               }}
             >
-              <iframe
-                srcDoc={cleanCode}
-                title="Preview"
-                className="w-full h-full border-none"
-                sandbox="allow-scripts allow-same-origin"
-              />
+              {previewUrl && useServerPreview ? (
+                <iframe
+                  src={previewUrl}
+                  title="Server Preview"
+                  className="w-full h-full border-none"
+                  sandbox="allow-scripts allow-same-origin"
+                />
+              ) : (
+                <iframe
+                  srcDoc={cleanCode}
+                  title="Preview"
+                  className="w-full h-full border-none"
+                  sandbox="allow-scripts allow-same-origin"
+                />
+              )}
             </div>
           </div>
         </TabsContent>

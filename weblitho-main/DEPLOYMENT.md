@@ -71,6 +71,42 @@ Response:
 }
 ```
 
+### Deploy Project Files
+Deploy project files from the frontend to the server. Supports both full project files (for npm build) and static HTML previews.
+
+```bash
+curl -X POST http://localhost/api/preview/deploy \
+     -H "Content-Type: application/json" \
+     -d '{
+       "projectId": "my-project",
+       "files": [
+         {"path": "src/App.tsx", "content": "..."},
+         {"path": "package.json", "content": "..."}
+       ],
+       "preview": "<!DOCTYPE html>..."
+     }'
+```
+
+Response:
+```json
+{
+  "previewUrl": "/preview/my-project",
+  "message": "Project deployed — ready for build",
+  "projectId": "my-project",
+  "needsBuild": true
+}
+```
+
+If only `preview` is provided (no `files`), the HTML is saved directly to the dist folder:
+```json
+{
+  "previewUrl": "/preview/my-project",
+  "message": "Static preview deployed — ready to view",
+  "projectId": "my-project",
+  "needsBuild": false
+}
+```
+
 ### Check Build Status
 ```bash
 curl http://localhost/api/preview/status/my-project

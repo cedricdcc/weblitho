@@ -13,11 +13,12 @@ import { TemplateGallery } from "@/components/builder/TemplateGallery";
 import { ImageUploadPanel } from "@/components/builder/ImageUploadPanel";
 import { ProjectsGrid } from "@/components/builder/ProjectsGrid";
 import { PagesPanel } from "@/components/builder/PagesPanel";
-import { Moon, Sun, Sparkles, LogOut, Trash2, Plus, PanelLeft, PanelLeftClose, Code2, Eye, LayoutDashboard, Save, FileText } from "lucide-react";
+import { Moon, Sun, Sparkles, LogOut, Trash2, Plus, PanelLeft, PanelLeftClose, Code2, Eye, LayoutDashboard, Save, FileText, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useProjects, ProjectFile, Project, ProjectPage } from "@/hooks/useProjects";
+import { usePreviewService } from "@/hooks/usePreviewService";
 import type { User } from "@supabase/supabase-js";
 import {
   AlertDialog,
@@ -82,11 +83,13 @@ const Index = () => {
   const [pages, setPages] = useState<ProjectPage[]>([{ id: 'home', name: 'Home', path: '/', icon: 'home' }]);
   const [activePage, setActivePage] = useState<string>('home');
   const [showPagesPanel, setShowPagesPanel] = useState(true);
+  const [serverPreviewUrl, setServerPreviewUrl] = useState<string | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const abortControllerRef = useRef<AbortController | null>(null);
   
   const { projects, loading: projectsLoading, createProject, updateProject, deleteProject, getProjectVersions, restoreVersion } = useProjects();
+  const { isDeploying, deployProject, getFullPreviewUrl } = usePreviewService();
 
   // Check authentication
   useEffect(() => {
@@ -151,6 +154,8 @@ const Index = () => {
     
     setIsSaving(true);
     try {
+      let currentProjectId = projectId;
+      
       if (projectId) {
         // Update existing project
         await updateProject(projectId, {
@@ -171,15 +176,39 @@ const Index = () => {
         if (newProject) {
           setSearchParams({ project: newProject.id });
           setProjectName(newProject.name);
+          currentProjectId = newProject.id;
         }
       }
       toast({ title: "Project saved", description: "Your project has been saved automatically" });
+      
+      // Deploy to server for static preview (if we have a project ID)
+      if (currentProjectId) {
+        const deployResult = await deployProject(currentProjectId, files, preview);
+        if (deployResult) {
+          setServerPreviewUrl(getFullPreviewUrl(deployResult.previewUrl));
+        }
+      }
     } catch (error) {
       console.error("Failed to save project:", error);
     } finally {
       setIsSaving(false);
     }
-  }, [user, projectId, selectedModel, updateProject, createProject, setSearchParams, toast]);
+  }, [user, projectId, selectedModel, updateProject, createProject, setSearchParams, toast, deployProject, getFullPreviewUrl]);
+
+  // Manual deploy to server
+  const handleDeployToServer = useCallback(async () => {
+    if (!projectId || !generatedContent) return;
+    
+    const deployResult = await deployProject(
+      projectId, 
+      generatedContent.files || [], 
+      generatedContent.preview
+    );
+    
+    if (deployResult) {
+      setServerPreviewUrl(getFullPreviewUrl(deployResult.previewUrl));
+    }
+  }, [projectId, generatedContent, deployProject, getFullPreviewUrl]);
 
   const toggleTheme = () => {
     setTheme(prev => prev === "dark" ? "light" : "dark");
@@ -601,6 +630,20 @@ const Index = () => {
                   <span className="hidden md:inline">New</span>
                 </Button>
                 
+                {/* Deploy to Server button */}
+                {projectId && generatedContent && (
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={handleDeployToServer}
+                    disabled={isDeploying}
+                    className="text-muted-foreground hover:text-foreground hover:bg-white/10 h-8 gap-2"
+                  >
+                    <Upload className={`h-4 w-4 ${isDeploying ? 'animate-pulse' : ''}`} />
+                    <span className="hidden md:inline">{isDeploying ? 'Deploying...' : 'Deploy'}</span>
+                  </Button>
+                )}
+                
                 <ExportOptions code={generatedContent?.preview || ""} files={generatedContent?.files} />
                 
                 <TemplateGallery onSelectTemplate={(prompt) => handleMessageSubmit(prompt)} />
@@ -817,6 +860,7 @@ const Index = () => {
                     isGenerating={isGenerating}
                     generationStatus={generationStatus}
                     validation={null}
+                    previewUrl={serverPreviewUrl}
                   />
                 </div>
               ) : generatedContent ? (
@@ -828,6 +872,7 @@ const Index = () => {
                       isGenerating={false}
                       generationStatus=""
                       validation={validation}
+                      previewUrl={serverPreviewUrl}
                     />
                   ) : (
                     <CodeViewer 
