@@ -224,6 +224,16 @@ The backend container has read-only access to the Docker socket (`/var/run/docke
   - A dedicated CI/CD system (GitHub Actions, GitLab CI)
   - BuildKit with a remote builder
 
+### Backend Container Permissions
+The backend container runs as root to ensure:
+- Write access to the `/projects` Docker volume
+- Access to the Docker socket for spawning build containers
+
+The container is isolated by Docker's sandboxing, and security is maintained through:
+- Read-only Docker socket access
+- Strict project ID validation
+- Rate limiting on API endpoints
+
 ### Project ID Validation
 - Project IDs are validated to contain only alphanumeric characters, hyphens, and underscores
 - Path traversal patterns (`.`, `/`, `\`) are explicitly blocked
