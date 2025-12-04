@@ -213,7 +213,7 @@ app.post("/api/preview/build", buildLimiter, async (req, res) => {
 });
 
 // Get build status endpoint
-app.get("/api/preview/status/:projectId", apiLimiter, (req, res) => {
+app.get("/api/preview/status/:projectId", apiLimiter, async (req, res) => {
   const { projectId } = req.params;
 
   // Validate projectId format
